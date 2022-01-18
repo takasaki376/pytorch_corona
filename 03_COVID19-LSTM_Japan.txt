@@ -1,0 +1,218 @@
+#!/usr/bin/env python
+# coding: utf-8
+
+# In[1]:
+
+
+import torch
+import torch.nn as nn
+import seaborn as sns
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+get_ipython().run_line_magic('matplotlib', 'inline')
+
+import datetime
+from pandas.plotting import register_matplotlib_converters
+from sklearn.preprocessing import MinMaxScaler
+
+
+# In[2]:
+
+
+df = pd.read_csv('time_series_covid19_confirmed_global.csv')
+
+
+# In[3]:
+
+
+df
+
+
+# In[4]:
+
+
+df = df[df['Country/Region']=='Japan']
+df
+
+
+# In[5]:
+
+
+df = df.iloc[:,4:].copy()
+df['4/16/20'] = [8626]
+daily_japan=df.iloc[0,:]
+daily_japan.index = pd.to_datetime(daily_japan.index)
+
+daily_japan
+
+
+# In[6]:
+
+
+plt.figure(figsize=(10,5))
+plt.plot(daily_japan)
+plt.title("Japan COVID-19")
+plt.grid(True)
+plt.ylabel("Person infected")
+plt.show()
+
+
+# In[7]:
+
+
+y=daily_japan.values.astype(float)
+
+
+# In[8]:
+
+
+def sequence_creator(input_data,window):
+    dataset=[]
+    data_len = len(input_data)
+    for i in range(data_len - window):
+        window_fr = input_data[i:i+window]
+        label = input_data[i+window:i+window+1]
+        dataset.append((window_fr,label))
+    return dataset
+
+
+# In[9]:
+
+
+class LSTM_COVID(nn.Module):
+    def __init__(self, in_size=1, h_size=30, out_size=1):
+        super().__init__()
+        
+        self.h_size = h_size
+        self.lstm = nn.LSTM(in_size, h_size)
+        self.fc = nn.Linear(h_size,out_size)
+        
+        self.hidden = (torch.zeros(1,1,self.h_size), torch.zeros(1,1,self.h_size))
+        
+    def forward(self, sequence_data):
+        lstm_out, self.hidden = self.lstm(sequence_data.view(len(sequence_data),1,-1),self.hidden)
+        pred = self.fc(lstm_out.view(len(sequence_data),-1))
+        return pred[-1]
+
+
+# In[10]:
+
+
+torch.manual_seed(3)
+
+model = LSTM_COVID()
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+
+# In[11]:
+
+
+epochs = 100
+window_size = 7
+loss_list = []
+loss_temp = 0
+
+#model.train()
+
+
+# In[12]:
+
+
+scaler = MinMaxScaler(feature_range=(-1,1))
+y_normalized = scaler.fit_transform(y.reshape(-1,1))
+y_normalized = torch.FloatTensor(y_normalized).view(-1)
+full_data = sequence_creator(y_normalized,window_size)
+
+
+# In[13]:
+
+
+for epoch in range(epochs):
+    for sequence_in, y_train in full_data:
+        
+        y_pred = model(sequence_in)
+        
+        loss = criterion(y_pred, y_train)
+        loss_temp += loss
+        
+        optimizer.zero_grad()
+        model.hidden = (torch.zeros(1,1,model.h_size),torch.zeros(1,1,model.h_size))
+        
+        loss.backward()
+        optimizer.step()
+        
+    if((epoch+1) % 10 ==0):
+        loss_list.append(loss_temp.item()/(10*len(full_data)))
+        print(f'Epoch {epoch+1} Loss {loss_temp.item()/(10*len(full_data))}')
+        loss_temp = 0
+
+
+# In[14]:
+
+
+plt.plot(loss_list)
+
+
+# In[15]:
+
+
+upcoming_future = 7
+predictions = y_normalized[-window_size:].tolist()
+
+model.eval()
+
+for i in range(upcoming_future):
+    sequence = torch.FloatTensor(predictions[-window_size:])
+    with torch.no_grad():
+        model.hidden = (torch.zeros(1,1,model.h_size),torch.zeros(1,1,model.h_size))
+        predictions.append(model(sequence).item())
+        
+predictions_y = scaler.inverse_transform(np.array(predictions).reshape(-1,1))
+x = np.arange('2020-04-17','2020-04-24', dtype='datetime64[D]').astype('datetime64[D]')
+sns.set()
+plt.figure(figsize = (12,4))
+plt.title("Japan COVID-19")
+plt.grid(True)
+plt.ylabel("Person infected")
+plt.plot(daily_japan)
+plt.plot(x,predictions_y[-window_size:])
+plt.show()
+
+
+# In[ ]:
+
+
+predictions_y[-window_size:]
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
+
